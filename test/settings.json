@@ -1,0 +1,15 @@
+{
+  "host": "0.0.0.0",
+  "port": 2000,
+  "certFile": "certificate\\server-cert.pem",
+  "keyFile": "certificate\\server-key.pem",
+  "dataFolder": "data",
+  "assetsFolder": "assets",
+  "users": [
+    {
+      "name": "test",
+      "password": "test",
+      "ipAddress": "*"
+    }
+  ]
+}

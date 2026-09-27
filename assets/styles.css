@@ -1,0 +1,15 @@
+.full_width_element {
+    width: 100%;
+    display: block;
+    box-sizing: border-box;
+}
+
+.form {
+    border: 1px solid #000000;
+    border-collapse: collapse;
+}
+
+.form th,
+.form td {
+    padding: 5px;
+}

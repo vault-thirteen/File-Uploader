@@ -1,0 +1,56 @@
+<!DOCTYPE html><!-- HTML version 5 -->
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta content="text/html; charset=utf-8" http-equiv=Content-Type>
+    <title>File Uploader</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/png" href="favicon.png"/>
+    <link rel="stylesheet" href="styles.css">
+    <script type="application/javascript" src="scripts.js"></script>
+</head>
+<body>
+    <div>
+    <h1>File Upload</h1>
+    <form name="fileUploadForm">
+    <table class="form">
+        <tr>
+            <td>User Name</td>
+            <td>
+				<input type="text" name="username" class="full_width_element" />
+			</td>
+        </tr>
+        <tr>
+            <td>User Password</td>
+            <td>
+				<input type="password" name="userpwd" class="full_width_element" />
+			</td>
+        </tr>
+		<tr>
+			<td>File Path</td>
+			<td>
+				<input type="text" name="filepath" class="full_width_element" />
+			</td>
+		</tr>
+		<tr>
+			<td>File Hash Sum, SHA-256</td>
+			<td>
+				<input type="text" name="filehash_sha256" class="full_width_element" />
+			</td>
+		</tr>
+		<tr>
+			<td>File</td>
+			<td>
+				<input type="file" name="file" class="full_width_element" />
+			</td>
+		</tr>
+		<tr>
+			<td colspan="2">
+				<input type="button" value="UPLOAD" name="upload_btn" class="full_width_element" onClick="onUploadBtnClick();" />
+			</td>
+		</tr>
+    </table>
+    </form>
+</div>
+</body>
+</html>
