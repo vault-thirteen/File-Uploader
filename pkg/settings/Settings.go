@@ -14,6 +14,7 @@ import (
 const (
 	Err_PortIsNotSet             = "port is not set"
 	Err_UsersAreNotSet           = "users are not set"
+	Err_FormSizeIsNotSet         = "form size is not set"
 	Err_DataFolderIsNotSet       = "folder is not set"
 	Err_DataFolderDoesNotExist   = "folder does not exist"
 	Err_AssetsFolderIsNotSet     = "assets folder is not set"
@@ -33,6 +34,7 @@ type Settings struct {
 	Port         uint16
 	SslCertFile  string
 	SslKeyFile   string
+	FormSizeMax  int64
 	DataFolder   string
 	AssetsFolder string
 	UserData     *UserData
@@ -73,6 +75,10 @@ func NewSettingsFromRawData(rawData JsonSettings) (s *Settings, err error) {
 
 	if len(rawData.Users) < 1 {
 		return nil, errors.New(Err_UsersAreNotSet)
+	}
+
+	if rawData.FormSizeMax == 0 {
+		return nil, errors.New(Err_FormSizeIsNotSet)
 	}
 
 	if len(rawData.DataFolder) < 1 {
@@ -126,6 +132,7 @@ func NewSettingsFromRawData(rawData JsonSettings) (s *Settings, err error) {
 		Port:         rawData.Port,
 		SslCertFile:  rawData.SslCertFile,
 		SslKeyFile:   rawData.SslKeyFile,
+		FormSizeMax:  rawData.FormSizeMax,
 		DataFolder:   rawData.DataFolder,
 		AssetsFolder: rawData.AssetsFolder,
 		UserData:     ud,

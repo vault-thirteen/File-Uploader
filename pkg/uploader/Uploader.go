@@ -32,7 +32,6 @@ const (
 	NewFolderPermissions      = 0777
 	HttpContentCacheTime      = 60
 	URL_Upload                = "upload"
-	FormSizeMax               = 64_000_000
 	FormField_UserName        = "username"
 	FormField_UserPassword    = "userpwd"
 	FormField_FilePath        = "filepath"
@@ -141,7 +140,7 @@ func (u *Uploader) router(rw http.ResponseWriter, req *http.Request) {
 	}
 }
 func (u *Uploader) router_upload(rw http.ResponseWriter, req *http.Request) {
-	err := req.ParseMultipartForm(FormSizeMax)
+	err := req.ParseMultipartForm(u.settings.FormSizeMax)
 	if err != nil {
 		u.httpRespond_BadRequest(rw)
 		return

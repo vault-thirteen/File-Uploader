@@ -3,6 +3,7 @@
   "port": 2000,
   "certFile": "certificate\\server-cert.pem",
   "keyFile": "certificate\\server-key.pem",
+  "formSizeMax": 64000000,
   "dataFolder": "data",
   "assetsFolder": "assets",
   "users": [

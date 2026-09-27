@@ -6,6 +6,7 @@ type JsonSettings struct {
 	Port         uint16             `json:"port"`
 	SslCertFile  string             `json:"certFile"`
 	SslKeyFile   string             `json:"keyFile"`
+	FormSizeMax  int64              `json:"formSizeMax"`
 	DataFolder   string             `json:"dataFolder"`
 	AssetsFolder string             `json:"assetsFolder"`
 	Users        []JsonSettingsUser `json:"users"`
