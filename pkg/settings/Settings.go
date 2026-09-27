@@ -15,8 +15,8 @@ const (
 	Err_PortIsNotSet             = "port is not set"
 	Err_UsersAreNotSet           = "users are not set"
 	Err_FormSizeIsNotSet         = "form size is not set"
-	Err_DataFolderIsNotSet       = "folder is not set"
-	Err_DataFolderDoesNotExist   = "folder does not exist"
+	Err_DataFolderIsNotSet       = "data folder is not set"
+	Errf_DataFolderDoesNotExist  = `data folder does not exist: "%s"`
 	Err_AssetsFolderIsNotSet     = "assets folder is not set"
 	Err_UserNameIsNotSet         = "user name is not set"
 	Err_UserPasswordIsNotSet     = "user password is not set"
@@ -91,7 +91,7 @@ func NewSettingsFromRawData(rawData JsonSettings) (s *Settings, err error) {
 		return nil, err
 	}
 	if !folderExists {
-		return nil, errors.New(Err_DataFolderDoesNotExist)
+		return nil, fmt.Errorf(Errf_DataFolderDoesNotExist, rawData.DataFolder)
 	}
 
 	if len(rawData.AssetsFolder) < 1 {
@@ -141,12 +141,12 @@ func NewSettingsFromRawData(rawData JsonSettings) (s *Settings, err error) {
 	return s, nil
 }
 
-func (s *Settings) CheckUser(userName string, userPassword string, userIPAddress string) (err error) {
+func (s *Settings) CheckClient(userName string, userPassword string, userIPAddress string) (err error) {
 	if s.UserData == nil {
 		return errors.New(Err_UserDataIsNotInitialised)
 	}
 
-	err = s.UserData.CheckUser(userName, userPassword, userIPAddress)
+	err = s.UserData.CheckClient(userName, userPassword, userIPAddress)
 	if err != nil {
 		return err
 	}

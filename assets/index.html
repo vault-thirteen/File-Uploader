@@ -7,6 +7,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="icon" type="image/png" href="favicon.png"/>
     <link rel="stylesheet" href="styles.css">
+	<script type="application/javascript" src="sha256.min.js"></script>
     <script type="application/javascript" src="scripts.js"></script>
 </head>
 <body>
@@ -27,26 +28,40 @@
 			</td>
         </tr>
 		<tr>
-			<td>File Path</td>
+			<td>Folder Path</td>
 			<td>
-				<input type="text" name="filepath" class="full_width_element" />
+				<input type="text" name="folderpath" class="full_width_element" />
 			</td>
 		</tr>
 		<tr>
-			<td>File Hash Sum, SHA-256</td>
+			<td>File Hash Sums (SHA-256)</td>
 			<td>
-				<input type="text" name="filehash_sha256" class="full_width_element" />
+				<input type="text" name="filehashes" class="full_width_element" readonly />
 			</td>
 		</tr>
-		<tr>
+		<tr id="file_row">
 			<td>File</td>
 			<td>
-				<input type="file" name="file" class="full_width_element" />
+				<input type="file" name="files" class="full_width_element" onchange="onFileInputChange(this);" multiple />
 			</td>
 		</tr>
 		<tr>
 			<td colspan="2">
 				<input type="button" value="UPLOAD" name="upload_btn" class="full_width_element" onClick="onUploadBtnClick();" />
+			</td>
+		</tr>
+		<tr>
+			<td>Status</td>
+			<td>
+				<div id="status"></div>
+			</td>
+		</tr>
+		<tr>
+			<td>Progress</td>
+			<td>
+				<div class="progressbar-container">
+					<div id="progressbar" class="progressbar"></div>
+				</div>
 			</td>
 		</tr>
     </table>

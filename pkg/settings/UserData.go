@@ -53,7 +53,7 @@ func (ud *UserData) AddUser(userName string, userPassword string, userIPAddress 
 	return nil
 }
 
-func (ud *UserData) CheckUser(userName string, userPassword string, userIPAddress string) (err error) {
+func (ud *UserData) CheckClient(userName string, userPassword string, userIPAddress string) (err error) {
 	userData, exists := ud.data[UserName(userName)]
 	if !exists {
 		return errors.New(Err_UserIsNotFound)

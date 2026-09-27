@@ -8,10 +8,11 @@ import (
 )
 
 type CachedContent struct {
-	IndexHtml  *cci.CachedContentItem
-	ScriptsJs  *cci.CachedContentItem
-	StylesCss  *cci.CachedContentItem
-	FaviconPng *cci.CachedContentItem
+	IndexHtml   *cci.CachedContentItem
+	ScriptsJs   *cci.CachedContentItem
+	Sha256MinJs *cci.CachedContentItem
+	StylesCss   *cci.CachedContentItem
+	FaviconPng  *cci.CachedContentItem
 }
 
 func NewCachedContent(assetsFolderPath string, ttl int) (cc *CachedContent, err error) {
@@ -24,6 +25,11 @@ func NewCachedContent(assetsFolderPath string, ttl int) (cc *CachedContent, err 
 	}
 
 	cc.ScriptsJs, err = cci.NewCachedContentItemFromFile(filepath.Join(assetsFolderPath, Asset_ScriptsJs), mime.TypeApplicationJavascript, ttl)
+	if err != nil {
+		return nil, err
+	}
+
+	cc.Sha256MinJs, err = cci.NewCachedContentItemFromFile(filepath.Join(assetsFolderPath, Asset_Sha256MinJs), mime.TypeApplicationJavascript, ttl)
 	if err != nil {
 		return nil, err
 	}

@@ -3,7 +3,7 @@ package uploader
 import (
 	"bytes"
 	"crypto/sha256"
-	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -29,14 +29,24 @@ import (
 )
 
 const (
-	NewFolderPermissions      = 0777
-	HttpContentCacheTime      = 60
-	URL_Upload                = "upload"
-	FormField_UserName        = "username"
-	FormField_UserPassword    = "userpwd"
-	FormField_FilePath        = "filepath"
-	FormField_FileHash_SHA256 = "filehash_sha256"
-	FormField_File            = "file"
+	NewFolderPermissions = 0777
+	HttpContentCacheTime = 60
+	URL_Upload           = "upload"
+)
+
+const (
+	FormField_UserName     = "username"
+	FormField_UserPassword = "userpwd"
+	FormField_FolderPath   = "folderpath"
+	FormField_FileHashes   = "filehashes"
+	FormField_Files        = "files"
+)
+
+const (
+	Err_FileHeaderIsNotAvailable = "file header is not available"
+	Err_FileOperationError       = "file operation error"
+	Errf_FileAlreadyExists       = `file already exists: "%s"`
+	Errf_HashSumMismatch         = `hash sum mismatch, file: "%s"`
 )
 
 type Uploader struct {
@@ -122,6 +132,10 @@ func (u *Uploader) router(rw http.ResponseWriter, req *http.Request) {
 		u.httpRespond_CachedContent(rw, u.cachedContent.ScriptsJs)
 		return
 
+	case cc.Asset_Sha256MinJs:
+		u.httpRespond_CachedContent(rw, u.cachedContent.Sha256MinJs)
+		return
+
 	case cc.Asset_StylesCss:
 		u.httpRespond_CachedContent(rw, u.cachedContent.StylesCss)
 		return
@@ -145,6 +159,12 @@ func (u *Uploader) router_upload(rw http.ResponseWriter, req *http.Request) {
 		u.httpRespond_BadRequest(rw)
 		return
 	}
+	defer func() {
+		derr := req.MultipartForm.RemoveAll()
+		if derr != nil {
+			err = ers.Combine(err, derr)
+		}
+	}()
 
 	userName := req.FormValue(FormField_UserName)
 	if len(userName) == 0 {
@@ -158,25 +178,16 @@ func (u *Uploader) router_upload(rw http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	filePath := req.FormValue(FormField_FilePath)
-	err = helper.CheckPath(filePath)
+	folderPath := req.FormValue(FormField_FolderPath)
+	err = helper.CheckPath(folderPath)
 	if err != nil {
 		u.httpRespond_BadRequest(rw)
 		return
 	}
 
-	fileHashSha256Text := req.FormValue(FormField_FileHash_SHA256)
-	if len(fileHashSha256Text) != 64 {
-		u.httpRespond_BadRequest(rw)
-		return
-	}
-	var fileHashSha256Bytes []byte
-	fileHashSha256Bytes, err = hex.DecodeString(fileHashSha256Text)
+	var hashes []helper.HashSum
+	hashes, err = helper.ParseFileHashes(req.FormValue(FormField_FileHashes))
 	if err != nil {
-		u.httpRespond_BadRequest(rw)
-		return
-	}
-	if len(fileHashSha256Bytes) != 32 {
 		u.httpRespond_BadRequest(rw)
 		return
 	}
@@ -188,81 +199,20 @@ func (u *Uploader) router_upload(rw http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	// Check the User.
-	err = u.settings.CheckUser(userName, userPwd, userIPAddressText)
+	// Check the client.
+	err = u.settings.CheckClient(userName, userPwd, userIPAddressText)
 	if err != nil {
 		u.httpRespond_Forbidden(rw)
 		return
 	}
 
-	var file multipart.File
-	var fileHeader *multipart.FileHeader
-	file, fileHeader, err = req.FormFile(FormField_File)
-	if err != nil {
-		u.httpRespond_BadRequest(rw)
-		return
-	}
-	defer func() {
-		derr := file.Close()
-		if derr != nil {
-			err = ers.Combine(err, derr)
-		}
-	}()
-
-	if fileHeader == nil {
-		u.httpRespond_BadRequest(rw)
-		return
-	}
-
-	fileName := fileHeader.Filename
-	fileSize := fileHeader.Size
-
-	var targetFilePath string
-	if len(filePath) == 0 {
-		targetFilePath = filepath.Join(u.dataFolder, fileName)
-	} else {
-		targetFilePath = filepath.Join(u.dataFolder, filePath, fileName)
-	}
-
-	var fileExists bool
-	fileExists, err = af.FileExists(targetFilePath)
-	if err != nil {
-		u.httpRespond_InternalServerError(rw)
-		return
-	}
-	if fileExists {
-		u.httpRespond_Conflict(rw)
-		return
-	}
-
-	msg := fmt.Sprintf("UserName: %s, FileSize: %d, FilePath: \"%s\", FileName: \"%s\".", userName, fileSize, filePath,
-		fileName)
-	log.Println(msg)
-
-	u.fileOperationMutex.Lock()
-	defer u.fileOperationMutex.Unlock()
-
-	err = u.saveFile(targetFilePath, file)
-	if err != nil {
-		u.httpRespond_InternalServerError(rw)
-		return
-	}
-
-	var hashesMatch bool
-	hashesMatch, err = u.verifyFile(targetFilePath, fileHashSha256Bytes)
-	if err != nil {
-		u.httpRespond_InternalServerError(rw)
-		return
-	}
-	if !hashesMatch {
-		err = u.deleteFile(targetFilePath)
+	files := req.MultipartForm.File[FormField_Files]
+	for i, fileHeader := range files {
+		err = u.processFile(fileHeader, folderPath, hashes[i], userName, rw)
 		if err != nil {
-			u.httpRespond_InternalServerError(rw)
+			log.Println(err)
 			return
 		}
-
-		u.httpRespond_BadRequest(rw)
-		return
 	}
 
 	return
@@ -294,6 +244,83 @@ func (u *Uploader) httpRespond_CachedContent(rw http.ResponseWriter, i *cci.Cach
 	}
 }
 
+func (u *Uploader) processFile(
+	fileHeader *multipart.FileHeader,
+	folderPath string,
+	fileHash helper.HashSum,
+	userName string,
+	rw http.ResponseWriter,
+) (err error) {
+	if fileHeader == nil {
+		u.httpRespond_BadRequest(rw)
+		return errors.New(Err_FileHeaderIsNotAvailable)
+	}
+
+	var file multipart.File
+	file, err = fileHeader.Open()
+	if err != nil {
+		u.httpRespond_InternalServerError(rw)
+		return helper.CompositeError(Err_FileOperationError, err)
+	}
+	defer func() {
+		derr := file.Close()
+		if derr != nil {
+			err = ers.Combine(err, derr)
+		}
+	}()
+
+	fileName := fileHeader.Filename
+	fileSize := fileHeader.Size
+
+	var targetFilePath string
+	if len(folderPath) == 0 {
+		targetFilePath = filepath.Join(u.dataFolder, fileName)
+	} else {
+		targetFilePath = filepath.Join(u.dataFolder, folderPath, fileName)
+	}
+
+	var fileExists bool
+	fileExists, err = af.FileExists(targetFilePath)
+	if err != nil {
+		u.httpRespond_InternalServerError(rw)
+		return helper.CompositeError(Err_FileOperationError, err)
+	}
+	if fileExists {
+		u.httpRespond_Conflict(rw)
+		return fmt.Errorf(Errf_FileAlreadyExists, fileName)
+	}
+
+	msg := fmt.Sprintf("UserName: %s, FileSize: %d, FolderPath: \"%s\", FileName: \"%s\".", userName, fileSize, folderPath, fileName)
+	log.Println(msg)
+
+	u.fileOperationMutex.Lock()
+	defer u.fileOperationMutex.Unlock()
+
+	err = u.saveFile(targetFilePath, file)
+	if err != nil {
+		u.httpRespond_InternalServerError(rw)
+		return helper.CompositeError(Err_FileOperationError, err)
+	}
+
+	var hashesMatch bool
+	hashesMatch, err = u.verifyFile(targetFilePath, fileHash)
+	if err != nil {
+		u.httpRespond_InternalServerError(rw)
+		return err
+	}
+	if !hashesMatch {
+		err = u.deleteFile(targetFilePath)
+		if err != nil {
+			u.httpRespond_InternalServerError(rw)
+			return helper.CompositeError(Err_FileOperationError, err)
+		}
+
+		u.httpRespond_BadRequest(rw)
+		return fmt.Errorf(Errf_HashSumMismatch, fileName)
+	}
+
+	return nil
+}
 func (u *Uploader) saveFile(targetFilePath string, file multipart.File) (err error) {
 	// Create the folder if it does not exist.
 	dir := filepath.Dir(targetFilePath)
