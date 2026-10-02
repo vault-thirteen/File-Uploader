@@ -3,19 +3,16 @@ package uploader
 import (
 	"bytes"
 	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"log"
 	"mime/multipart"
-	"net"
 	"net/http"
 	"os"
 	"path/filepath"
-	"strconv"
-	"strings"
-	"sync"
-	"time"
+	"runtime"
 
 	cc "github.com/vault-thirteen/File-Uploader/pkg/CachedContent"
 	"github.com/vault-thirteen/File-Uploader/pkg/helper"
@@ -23,15 +20,21 @@ import (
 
 	ers "github.com/vault-thirteen/auxie/errors"
 	af "github.com/vault-thirteen/auxie/file"
-	"github.com/vault-thirteen/auxie/header"
-	hh "github.com/vault-thirteen/auxie/http-helper"
-	cci "github.com/vault-thirteen/auxie/http-helper/CachedContentItem"
 )
 
 const (
-	NewFolderPermissions = 0777
-	HttpContentCacheTime = 60
-	URL_Upload           = "upload"
+	TmpDirPermissions                       = 0777
+	NewFolderPermissions                    = 0777
+	JournalFilePermissions                  = 0644
+	HttpContentCacheTime                    = 60
+	URL_Upload                              = "upload"
+	URL_QueueSize                           = "queue"
+	JournalTabulator                        = "\t"
+	JournalLineEnd                          = helper.CRLF
+	EnvVar_SystemTemporaryDirectory_Windows = "TMP"
+	EnvVar_SystemTemporaryDirectory_Darwin  = "TMPDIR"
+	EnvVar_SystemTemporaryDirectory_Linux   = "TMPDIR"
+	EnvVar_SystemTemporaryDirectory_FreeBSD = "TMPDIR"
 )
 
 const (
@@ -47,24 +50,37 @@ const (
 	Err_FileOperationError       = "file operation error"
 	Errf_FileAlreadyExists       = `file already exists: "%s"`
 	Errf_HashSumMismatch         = `hash sum mismatch, file: "%s"`
+	Err_AlreadyStarted           = "already started"
+	Err_AlreadyStopped           = "already stopped"
+	Errf_UnknownOsType           = "unknown OS type: %s"
+)
+
+const (
+	Msgf_FilesInQueue       = "File in queue: %d."
+	Msgf_TemporaryDirectory = "Using temporary directory: %s"
 )
 
 type Uploader struct {
-	settings           *settings.Settings
-	dataFolder         string
-	httpServer         *http.Server
-	cachedContent      *cc.CachedContent
-	fileOperationMutex *sync.Mutex
+	controls      *UploaderControls
+	settings      *settings.Settings
+	dataFolder    string
+	cachedContent *cc.CachedContent
+	httpServer    *http.Server
 }
 
 func NewUploader(s *settings.Settings) (u *Uploader, err error) {
 	u = &Uploader{
-		settings:           s,
-		dataFolder:         s.DataFolder,
-		fileOperationMutex: &sync.Mutex{},
+		controls:   NewUploaderControls(),
+		settings:   s,
+		dataFolder: s.DataFolder,
 	}
 
 	err = u.checkDataFolder()
+	if err != nil {
+		return nil, err
+	}
+
+	err = u.setTemporaryDirectory()
 	if err != nil {
 		return nil, err
 	}
@@ -74,17 +90,10 @@ func NewUploader(s *settings.Settings) (u *Uploader, err error) {
 		return nil, err
 	}
 
-	u.httpServer = &http.Server{
-		Addr: net.JoinHostPort(
-			s.Host,
-			strconv.FormatUint(uint64(s.Port), 10),
-		),
-		Handler: http.HandlerFunc(u.router),
-	}
+	u.httpServer = u.NewHttpServer(s.Host, s.Port)
 
 	return u, nil
 }
-
 func (u *Uploader) checkDataFolder() (err error) {
 	var folderExists bool
 	folderExists, err = af.FolderExists(u.dataFolder)
@@ -101,156 +110,90 @@ func (u *Uploader) checkDataFolder() (err error) {
 
 	return nil
 }
+func (u *Uploader) setTemporaryDirectory() (err error) {
+	if len(u.settings.TempDir) > 0 {
+		err = os.MkdirAll(u.settings.TempDir, TmpDirPermissions)
+		if err != nil {
+			return err
+		}
+	}
 
-func (u *Uploader) Run() (err error) {
-	err = u.httpServer.ListenAndServeTLS(u.settings.SslCertFile, u.settings.SslKeyFile)
+	switch runtime.GOOS {
+	case "windows": // Microsoft Windows.
+		err = os.Setenv(EnvVar_SystemTemporaryDirectory_Windows, u.settings.TempDir)
+
+	case "darwin": // Apple MacOS.
+		err = os.Setenv(EnvVar_SystemTemporaryDirectory_Darwin, u.settings.TempDir)
+
+	case "linux": // Linux zoo.
+		err = os.Setenv(EnvVar_SystemTemporaryDirectory_Linux, u.settings.TempDir)
+
+	case "freebsd": // FreeBSD.
+		err = os.Setenv(EnvVar_SystemTemporaryDirectory_FreeBSD, u.settings.TempDir)
+
+	default: // Unknown O.S.
+		return fmt.Errorf(Errf_UnknownOsType, runtime.GOOS)
+	}
+
 	if err != nil {
 		return err
 	}
 
+	log.Println(fmt.Sprintf(Msgf_TemporaryDirectory, u.settings.TempDir))
+
 	return nil
 }
-
-func (u *Uploader) router(rw http.ResponseWriter, req *http.Request) {
-	left, right, ok := strings.Cut(req.URL.Path, helper.UrlPathSeparator)
-	if !ok {
-		u.httpRespond_BadRequest(rw)
-		return
+func (u *Uploader) Start() (err error) {
+	u.controls.startStopMutex.Lock()
+	defer u.controls.startStopMutex.Unlock()
+	if u.controls.isRunning.Load() {
+		return errors.New(Err_AlreadyStarted)
 	}
 
-	if len(left) != 0 {
-		u.httpRespond_NotFound(rw)
-		return
-	}
-
-	switch right {
-	case "", cc.Asset_IndexHtml:
-		u.httpRespond_CachedContent(rw, u.cachedContent.IndexHtml)
-		return
-
-	case cc.Asset_ScriptsJs:
-		u.httpRespond_CachedContent(rw, u.cachedContent.ScriptsJs)
-		return
-
-	case cc.Asset_Sha256MinJs:
-		u.httpRespond_CachedContent(rw, u.cachedContent.Sha256MinJs)
-		return
-
-	case cc.Asset_StylesCss:
-		u.httpRespond_CachedContent(rw, u.cachedContent.StylesCss)
-		return
-
-	case cc.Asset_FaviconPng:
-		u.httpRespond_CachedContent(rw, u.cachedContent.FaviconPng)
-		return
-
-	case URL_Upload:
-		u.router_upload(rw, req)
-		return
-
-	default:
-		u.httpRespond_NotFound(rw)
-		return
-	}
-}
-func (u *Uploader) router_upload(rw http.ResponseWriter, req *http.Request) {
-	err := req.ParseMultipartForm(u.settings.FormSizeMax)
+	// 1. Start Watcher.
+	err = u.startWatcher()
 	if err != nil {
-		u.httpRespond_BadRequest(rw)
-		return
-	}
-	defer func() {
-		derr := req.MultipartForm.RemoveAll()
-		if derr != nil {
-			err = ers.Combine(err, derr)
-		}
-	}()
-
-	userName := req.FormValue(FormField_UserName)
-	if len(userName) == 0 {
-		u.httpRespond_BadRequest(rw)
-		return
+		return err
 	}
 
-	userPwd := req.FormValue(FormField_UserPassword)
-	if len(userPwd) == 0 {
-		u.httpRespond_BadRequest(rw)
-		return
-	}
-
-	folderPath := req.FormValue(FormField_FolderPath)
-	err = helper.CheckPath(folderPath)
+	// 2.  Start HTTP Server.
+	err = u.startHttpServer()
 	if err != nil {
-		u.httpRespond_BadRequest(rw)
-		return
+		return err
 	}
 
-	var hashes []helper.HashSum
-	hashes, err = helper.ParseFileHashes(req.FormValue(FormField_FileHashes))
+	u.controls.isRunning.Store(true)
+	return nil
+}
+func (u *Uploader) Stop() (err error) {
+	u.controls.startStopMutex.Lock()
+	defer u.controls.startStopMutex.Unlock()
+	if !u.controls.isRunning.Load() {
+		return errors.New(Err_AlreadyStopped)
+	}
+
+	log.Println(fmt.Sprintf(Msgf_FilesInQueue, u.controls.currentUploadsNum.Load()))
+
+	// 1.  Stop HTTP Server.
+	err = u.stopHttpServer()
 	if err != nil {
-		u.httpRespond_BadRequest(rw)
-		return
+		return err
 	}
 
-	var userIPAddressText string
-	userIPAddressText, err = helper.GetClientIPAddress(req)
+	// 2. Stop Watcher.
+	err = u.stopWatcher()
 	if err != nil {
-		u.httpRespond_BadRequest(rw)
-		return
+		return err
 	}
 
-	// Check the client.
-	err = u.settings.CheckClient(userName, userPwd, userIPAddressText)
-	if err != nil {
-		u.httpRespond_Forbidden(rw)
-		return
-	}
-
-	files := req.MultipartForm.File[FormField_Files]
-	for i, fileHeader := range files {
-		err = u.processFile(fileHeader, folderPath, hashes[i], userName, rw)
-		if err != nil {
-			log.Println(err)
-			return
-		}
-	}
-
-	return
+	u.controls.isRunning.Store(false)
+	return nil
+}
+func (u *Uploader) IsRunning() bool {
+	return u.controls.isRunning.Load()
 }
 
-func (u *Uploader) httpRespond_BadRequest(rw http.ResponseWriter) {
-	rw.WriteHeader(http.StatusBadRequest)
-}
-func (u *Uploader) httpRespond_NotFound(rw http.ResponseWriter) {
-	rw.WriteHeader(http.StatusNotFound)
-}
-func (u *Uploader) httpRespond_Forbidden(rw http.ResponseWriter) {
-	rw.WriteHeader(http.StatusForbidden)
-}
-func (u *Uploader) httpRespond_Conflict(rw http.ResponseWriter) {
-	rw.WriteHeader(http.StatusConflict)
-}
-func (u *Uploader) httpRespond_InternalServerError(rw http.ResponseWriter) {
-	rw.WriteHeader(http.StatusInternalServerError)
-}
-func (u *Uploader) httpRespond_CachedContent(rw http.ResponseWriter, i *cci.CachedContentItem) {
-	now := time.Now().UTC()
-	rw.Header().Set(header.HttpHeaderContentType, i.ContentType())
-	hh.SetCacheTime(rw, i.TTLSec(), now)
-
-	_, err := rw.Write(i.Data())
-	if err != nil {
-		log.Println(err)
-	}
-}
-
-func (u *Uploader) processFile(
-	fileHeader *multipart.FileHeader,
-	folderPath string,
-	fileHash helper.HashSum,
-	userName string,
-	rw http.ResponseWriter,
-) (err error) {
+func (u *Uploader) processFile(fileHeader *multipart.FileHeader, folderPath string, fileHash helper.HashSum, userName string, rw http.ResponseWriter) (err error) {
 	if fileHeader == nil {
 		u.httpRespond_BadRequest(rw)
 		return errors.New(Err_FileHeaderIsNotAvailable)
@@ -290,11 +233,8 @@ func (u *Uploader) processFile(
 		return fmt.Errorf(Errf_FileAlreadyExists, fileName)
 	}
 
-	msg := fmt.Sprintf("UserName: %s, FileSize: %d, FolderPath: \"%s\", FileName: \"%s\".", userName, fileSize, folderPath, fileName)
-	log.Println(msg)
-
-	u.fileOperationMutex.Lock()
-	defer u.fileOperationMutex.Unlock()
+	u.controls.fileOperationMutex.Lock()
+	defer u.controls.fileOperationMutex.Unlock()
 
 	err = u.saveFile(targetFilePath, file)
 	if err != nil {
@@ -317,6 +257,13 @@ func (u *Uploader) processFile(
 
 		u.httpRespond_BadRequest(rw)
 		return fmt.Errorf(Errf_HashSumMismatch, fileName)
+	}
+
+	fileHashHexString := hex.EncodeToString(fileHash)
+	err = u.updateJournal(userName, folderPath, int(fileSize), fileName, fileHashHexString)
+	if err != nil {
+		u.httpRespond_InternalServerError(rw)
+		return err
 	}
 
 	return nil

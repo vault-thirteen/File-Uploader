@@ -12,5 +12,8 @@
       "password": "test",
       "ipAddress": "*"
     }
-  ]
+  ],
+  "journal": "journal.txt",
+  "tempDir": ".\\",
+  "simultaneousUploadsCount": 1
 }

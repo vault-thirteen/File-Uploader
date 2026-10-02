@@ -2,14 +2,17 @@ package settings
 
 // JsonSettings is a type for settings' raw data in JSON file.
 type JsonSettings struct {
-	Host         string             `json:"host"`
-	Port         uint16             `json:"port"`
-	SslCertFile  string             `json:"certFile"`
-	SslKeyFile   string             `json:"keyFile"`
-	FormSizeMax  int64              `json:"formSizeMax"`
-	DataFolder   string             `json:"dataFolder"`
-	AssetsFolder string             `json:"assetsFolder"`
-	Users        []JsonSettingsUser `json:"users"`
+	Host                     string             `json:"host"`
+	Port                     uint16             `json:"port"`
+	SslCertFile              string             `json:"certFile"`
+	SslKeyFile               string             `json:"keyFile"`
+	FormSizeMax              int64              `json:"formSizeMax"`
+	DataFolder               string             `json:"dataFolder"`
+	AssetsFolder             string             `json:"assetsFolder"`
+	Users                    []JsonSettingsUser `json:"users"`
+	Journal                  string             `json:"journal"`
+	TempDir                  string             `json:"tempDir"`
+	SimultaneousUploadsCount int                `json:"simultaneousUploadsCount"`
 }
 
 type JsonSettingsUser struct {

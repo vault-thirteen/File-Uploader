@@ -9,12 +9,14 @@ const inputName = {
 };
 const url = {
     upload: "/upload",
+    serverQueueSize: "/queue",
 }
 const message = {
     selectedFiles: "Selected files:",
     calculatingHashSum: `Calculating hash sums. Please, wait ... <br> File %s of %s. %s.`,
     sendingFiles: "Sending files. Please, wait ...",
     uploadFailed: "Upload failed. More details are available in console.",
+    serverIsBusy: "Server is busy. Try again later.",
     successfulUpload: "Successful upload",
 };
 const error = {
@@ -29,7 +31,40 @@ const id = {
     status: "status",
     fileRow: "file_row",
     progressbar: "progressbar",
+    serverQueueSize: "server_queue_size",
+    serverResponseTime: "server_response_time",
 };
+let lastRequestStatusCode = 0;
+let sqsPingMs = 0;
+const interval = {
+    updateSQS: 5,
+}
+
+window.addEventListener("load", () => {
+    onBodyLoaded().then(r => {
+    });
+});
+
+async function onBodyLoaded() {
+    await updateSQS();
+    setInterval(updateSQS, interval.updateSQS * 1000);
+}
+
+async function updateSQS() {
+    let divSQS = document.getElementById(id.serverQueueSize);
+    let divSRT = document.getElementById(id.serverResponseTime);
+
+    divSQS.textContent = "";
+    divSRT.textContent = "";
+
+    const timeStart = performance.now();
+    let sqs = await fetchServerQueueSize();
+    const timeEnd = performance.now();
+
+    sqsPingMs = timeEnd - timeStart;
+    divSQS.textContent = sqs.toString();
+    divSRT.textContent = sqsPingMs + " ms";
+}
 
 async function onFileInputChange(element) {
     console.log(message.selectedFiles, element.files);
@@ -61,7 +96,11 @@ async function onUploadBtnClick() {
     let ok = await sendForm();
     enableControls(true);
     if (!ok) {
-        updateStatus(message.uploadFailed);
+        if (lastRequestStatusCode === 503) {
+            updateStatus(message.serverIsBusy);
+        } else {
+            updateStatus(message.uploadFailed);
+        }
         return false;
     }
 
@@ -121,6 +160,7 @@ async function sendFormUsingXHRAsync() {
         });
 
         xhr.addEventListener('load', () => {
+            lastRequestStatusCode = xhr.status;
             if (xhr.status >= 200 && xhr.status < 300) {
                 resolve(true);
             } else {
@@ -220,4 +260,25 @@ function setProgress(percent) {
     let pb = document.getElementById(id.progressbar);
     let cp = Math.min(Math.max(percent, 0), 100);
     pb.style.width = cp + "%";
+}
+
+async function sleep(ms) {
+    await new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function fetchServerQueueSize() {
+    try {
+        let response = await fetch(url.serverQueueSize);
+
+        if (!response.ok) {
+            console.error(error.server, response.status);
+            return null;
+        }
+
+        let data = await response.json();
+        return data.queue;
+    } catch (error) {
+        console.error(error);
+        return null;
+    }
 }

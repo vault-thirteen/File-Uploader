@@ -9,20 +9,24 @@ import (
 
 	ers "github.com/vault-thirteen/auxie/errors"
 	af "github.com/vault-thirteen/auxie/file"
+	au "github.com/vault-thirteen/auxie/unicode"
 )
 
 const (
-	Err_PortIsNotSet             = "port is not set"
-	Err_UsersAreNotSet           = "users are not set"
-	Err_FormSizeIsNotSet         = "form size is not set"
-	Err_DataFolderIsNotSet       = "data folder is not set"
-	Errf_DataFolderDoesNotExist  = `data folder does not exist: "%s"`
-	Err_AssetsFolderIsNotSet     = "assets folder is not set"
-	Err_UserNameIsNotSet         = "user name is not set"
-	Err_UserPasswordIsNotSet     = "user password is not set"
-	Err_UserIPAddressIsNotSet    = "user IP address is not set"
-	Errf_UserIPAddressIsNotValid = " IP address is not valid, user name: %s"
-	Err_UserDataIsNotInitialised = "user data is not initialised"
+	Err_PortIsNotSet                     = "port is not set"
+	Err_UsersAreNotSet                   = "users are not set"
+	Err_FormSizeIsNotSet                 = "form size is not set"
+	Err_DataFolderIsNotSet               = "data folder is not set"
+	Errf_DataFolderDoesNotExist          = `data folder does not exist: "%s"`
+	Err_AssetsFolderIsNotSet             = "assets folder is not set"
+	Err_UserNameIsNotSet                 = "user name is not set"
+	Errf_UserNameIsNotValid              = `user name is not valid: "%s"`
+	Err_UserPasswordIsNotSet             = "user password is not set"
+	Err_UserIPAddressIsNotSet            = "user IP address is not set"
+	Errf_UserIPAddressIsNotValid         = " IP address is not valid, user name: %s"
+	Err_UserDataIsNotInitialised         = "user data is not initialised"
+	Err_JournalIsNotSet                  = "journal is not set"
+	Err_SimultaneousUploadsCountIsNotSet = "simultaneous uploads count is not set"
 )
 
 const (
@@ -30,14 +34,17 @@ const (
 )
 
 type Settings struct {
-	Host         string
-	Port         uint16
-	SslCertFile  string
-	SslKeyFile   string
-	FormSizeMax  int64
-	DataFolder   string
-	AssetsFolder string
-	UserData     *UserData
+	Host                     string
+	Port                     uint16
+	SslCertFile              string
+	SslKeyFile               string
+	FormSizeMax              int64
+	DataFolder               string
+	AssetsFolder             string
+	UserData                 *UserData
+	Journal                  string
+	TempDir                  string
+	SimultaneousUploadsCount int
 }
 
 func NewSettingsFromFile(settingsFilePath string) (s *Settings, err error) {
@@ -105,6 +112,10 @@ func NewSettingsFromRawData(rawData JsonSettings) (s *Settings, err error) {
 			return nil, errors.New(Err_UserNameIsNotSet)
 		}
 
+		if !IsUserNameValid(user.Name) {
+			return nil, fmt.Errorf(Errf_UserNameIsNotValid, user.Name)
+		}
+
 		if len(user.Password) == 0 {
 			return nil, errors.New(Err_UserPasswordIsNotSet)
 		}
@@ -127,18 +138,41 @@ func NewSettingsFromRawData(rawData JsonSettings) (s *Settings, err error) {
 
 	}
 
+	if len(rawData.Journal) < 1 {
+		return nil, errors.New(Err_JournalIsNotSet)
+	}
+
+	if rawData.SimultaneousUploadsCount <= 0 {
+		return nil, errors.New(Err_SimultaneousUploadsCountIsNotSet)
+	}
+
 	s = &Settings{
-		Host:         rawData.Host,
-		Port:         rawData.Port,
-		SslCertFile:  rawData.SslCertFile,
-		SslKeyFile:   rawData.SslKeyFile,
-		FormSizeMax:  rawData.FormSizeMax,
-		DataFolder:   rawData.DataFolder,
-		AssetsFolder: rawData.AssetsFolder,
-		UserData:     ud,
+		Host:                     rawData.Host,
+		Port:                     rawData.Port,
+		SslCertFile:              rawData.SslCertFile,
+		SslKeyFile:               rawData.SslKeyFile,
+		FormSizeMax:              rawData.FormSizeMax,
+		DataFolder:               rawData.DataFolder,
+		AssetsFolder:             rawData.AssetsFolder,
+		UserData:                 ud,
+		Journal:                  rawData.Journal,
+		TempDir:                  rawData.TempDir,
+		SimultaneousUploadsCount: rawData.SimultaneousUploadsCount,
 	}
 
 	return s, nil
+}
+
+func IsUserNameValid(userName string) bool {
+	symbols := []rune(userName)
+
+	for _, symbol := range symbols {
+		if !au.SymbolIsLatLetter(symbol) && !au.SymbolIsNumber(symbol) {
+			return false
+		}
+	}
+
+	return true
 }
 
 func (s *Settings) CheckClient(userName string, userPassword string, userIPAddress string) (err error) {
