@@ -66,6 +66,7 @@ type Uploader struct {
 	dataFolder    string
 	cachedContent *cc.CachedContent
 	httpServer    *http.Server
+	journalFile   *os.File
 }
 
 func NewUploader(s *settings.Settings) (u *Uploader, err error) {
@@ -156,7 +157,13 @@ func (u *Uploader) Start() (err error) {
 		return err
 	}
 
-	// 2.  Start HTTP Server.
+	// 2. Open Journal.
+	u.journalFile, err = os.OpenFile(u.settings.Journal, os.O_APPEND|os.O_CREATE|os.O_WRONLY, JournalFilePermissions)
+	if err != nil {
+		return err
+	}
+
+	// 3.  Start HTTP Server.
 	err = u.startHttpServer()
 	if err != nil {
 		return err
@@ -174,13 +181,19 @@ func (u *Uploader) Stop() (err error) {
 
 	log.Println(fmt.Sprintf(Msgf_FilesInQueue, u.controls.currentUploadsNum.Load()))
 
-	// 1.  Stop HTTP Server.
+	// 3.  Stop HTTP Server.
 	err = u.stopHttpServer()
 	if err != nil {
 		return err
 	}
 
-	// 2. Stop Watcher.
+	// 2. Close Journal.
+	err = u.journalFile.Close()
+	if err != nil {
+		return err
+	}
+
+	// 1. Stop Watcher.
 	err = u.stopWatcher()
 	if err != nil {
 		return err
